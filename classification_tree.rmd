@@ -1,0 +1,19 @@
+---
+title: "classification_tree"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+library(tree)
+library(ISLR)
+library(randomForest)
+data = read.csv("online_shoppers_intention.csv")
+```
+
+```{r}
+tree.data = tree(Revenue~.-Revenue,data)
+plot(tree.data)
+text(tree.data, pretty = 0)
+```
