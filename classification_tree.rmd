@@ -7,13 +7,83 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 rm(list = ls())
 library(tree)
-library(ISLR)
+library(caret)
 library(randomForest)
+library(gbm)
+#library(ROSE)
+#library(ROCR)
 data = read.csv("online_shoppers_intention.csv")
+data$Weekend = as.factor(data$Weekend)
+data$OperatingSystems = as.factor(data$OperatingSystems)
+data$Browser = as.factor(data$Browser)
+data$TrafficType = as.factor(data$TrafficType)
+data$VisitorType = as.factor(data$VisitorType)
 ```
 
 ```{r}
-tree.data = tree(Revenue~.-Revenue,data)
+#set.seed(928)
+train = sample(1:nrow(data), nrow(data)*7/8)
+data.test = data[-train,]
+data.train = data[train,]
+rev.train = data$Revenue[train]
+rev.test = data$Revenue[-train]
+```
+
+```{r}
+tree.data = tree(Revenue~., data.train)
 plot(tree.data)
 text(tree.data, pretty = 0)
+tree.pred = predict(tree.data,data.test)
+pred.factor = ifelse(tree.pred >= 0.5, TRUE,FALSE)
+```
+
+```{r}
+cm = confusionMatrix(table(pred.factor,rev.test))
+str(cm)
+```
+
+The idea:
+People fall into 3 categories: unlikely to buy at all, possibly likely, and very likely. We want to identify and target those who are possibly likely to buy something, with the goal of influencing them to finish the transaction.
+
+Using cross-validation to confirm that splitting past pageValues is only marginally helpful.
+```{r}
+cv.tree = cv.tree(tree.data)
+plot(cv.tree$size, cv.tree$dev, type = "b")
+```
+
+## Bagging
+
+```{r}
+bag.tree = randomForest(Revenue~.-PageValues, data = data.train, mtry = 10, importance = TRUE, ntrees = 300)
+bag.pred = predict(bag.tree, data.test)
+```
+
+```{r}
+bag.pred.factor = ifelse(bag.pred >= 0.5, TRUE,FALSE)
+confusionMatrix(table(bag.pred.factor,rev.test))
+varImpPlot(bag.tree)
+bag.tree
+```
+
+"Considering that the “Page Value” [12] feature represents the page
+that a user visited before completing an e-commerce transaction, it can be seen as a
+natural measure of visitor’s transaction finalization intention. In our system, this feature
+is represented as the average of the "Page Value" values of pages visited by the visitor
+during the session and is updated when the visitor moves to another page."
+
+## Boosting
+```{r}
+#set.seed(1337)
+boost.data = gbm(Revenue~.-PageValues, data = data.train,n.trees = 1000, shrinkage = 0.01)
+summary(boost.data)
+```
+
+```{r}
+boost.pred = predict(boost.data, newdata = data.test, n.trees = 1000)
+predictions = exp(boost.pred)/(1 + exp(boost.pred))
+pred.factor = ifelse(predictions >= 0.7, TRUE,FALSE)
+
+confusionMatrix(table(pred.factor,rev.test))
+
+# remember that false positives are more costly than false negatives
 ```

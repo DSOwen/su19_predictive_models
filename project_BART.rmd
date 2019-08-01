@@ -1,0 +1,62 @@
+---
+title: "problem4"
+author: "David Owen"
+date: "7/31/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+library(BART)
+library(caret)
+library(dummies)
+
+data = read.csv("online_shoppers_intention.csv")
+data$Weekend = as.factor(data$Weekend)
+data$OperatingSystems = as.factor(data$OperatingSystems)
+data$Browser = as.factor(data$Browser)
+data$TrafficType = as.factor(data$TrafficType)
+data$VisitorType = as.factor(data$VisitorType)
+```
+
+```{r}
+x = data[,-18]
+y = data$Revenue
+
+set.seed(1337)
+nd = 200
+burn = 50
+bf = wbart(x,y,nskip = burn, ndpost = nd)
+```
+
+```{r}
+lmf = lm(y~.,data.frame(x,y))
+fitmat = cbind(y,bf$yhat.train.mean, lmf$fitted.values)
+colnames(fitmat) = c("y","BART","Linear")
+cor(fitmat)
+```
+
+```{r}
+n = length(y)
+set.seed(1337)
+ii = sample(1:n, floor(.75*n))
+xtrain=x[ii,]
+ytrain=y[ii]
+
+xtest=x[-ii,]
+ytest=y[-ii]
+
+set.seed(1337)
+bf_train = wbart(xtrain,ytrain, lambda = .2, ntree = 300)
+
+xtest = as.matrix(xtest)
+
+yhat = predict(bf_train, xtest)
+yhat.mean = apply(yhat,2,mean)
+```
+
+```{r}
+pred.factor = ifelse(yhat.mean >= 0.5, TRUE,FALSE)
+confusionMatrix(table(pred.factor,ytest))
+```
