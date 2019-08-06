@@ -10,8 +10,8 @@ library(tree)
 library(caret)
 library(randomForest)
 library(gbm)
-#library(ROSE)
-#library(ROCR)
+library(ROCR)
+library(MLmetrics)
 data = read.csv("online_shoppers_intention.csv")
 data$Weekend = as.factor(data$Weekend)
 data$OperatingSystems = as.factor(data$OperatingSystems)
@@ -34,12 +34,11 @@ tree.data = tree(Revenue~., data.train)
 plot(tree.data)
 text(tree.data, pretty = 0)
 tree.pred = predict(tree.data,data.test)
-pred.factor = ifelse(tree.pred >= 0.5, TRUE,FALSE)
+pred.factor = ifelse(tree.pred >= 0.1, TRUE,FALSE)
 ```
 
 ```{r}
-cm = confusionMatrix(table(pred.factor,rev.test))
-str(cm)
+confusionMatrix(table(rev.test,pred.factor), positive = 'TRUE')
 ```
 
 The idea:
@@ -47,22 +46,29 @@ People fall into 3 categories: unlikely to buy at all, possibly likely, and very
 
 Using cross-validation to confirm that splitting past pageValues is only marginally helpful.
 ```{r}
-cv.tree = cv.tree(tree.data)
-plot(cv.tree$size, cv.tree$dev, type = "b")
+#cv.tree = cv.tree(tree.data)
+#plot(cv.tree$size, cv.tree$dev, type = "b")
 ```
 
 ## Bagging
 
 ```{r}
-bag.tree = randomForest(Revenue~.-PageValues, data = data.train, mtry = 10, importance = TRUE, ntrees = 300)
+bag.tree = randomForest(Revenue~., data = data.train, mtry = 17, importance = TRUE, ntrees = 500, replace = TRUE)
 bag.pred = predict(bag.tree, data.test)
 ```
 
 ```{r}
-bag.pred.factor = ifelse(bag.pred >= 0.5, TRUE,FALSE)
-confusionMatrix(table(bag.pred.factor,rev.test))
+bag.pred.factor = ifelse(bag.pred >= 0.2, TRUE,FALSE)
+confusionMatrix(table(bag.pred.factor,rev.test), positive = 'TRUE')
 varImpPlot(bag.tree)
-bag.tree
+#bag.tree
+
+prcurve = prediction(bag.pred,rev.test)
+prcurve = performance(prcurve, "prec","rec")
+#plot(prcurve)
+
+PRAUC(bag.pred,rev.test)
+
 ```
 
 "Considering that the “Page Value” [12] feature represents the page
@@ -74,16 +80,57 @@ during the session and is updated when the visitor moves to another page."
 ## Boosting
 ```{r}
 #set.seed(1337)
-boost.data = gbm(Revenue~.-PageValues, data = data.train,n.trees = 1000, shrinkage = 0.01)
-summary(boost.data)
+numtrees = c(1000,1500,2000,3000)
+shrink = c(.1,.02,.01,.005,.008)
+best_n = 0
+best_s = 0
+best_auc = 0
+best_prcurve = NaN
+
+for (n in numtrees) {
+  for (s in shrink) {
+    boost.data = gbm(Revenue~., data = data.train[-c(3,4,10,11,12,13,14,15,16,17)],n.trees = n, shrinkage = s, distribution = "bernoulli")
+    boost.pred = predict(boost.data, newdata = data.test, n.trees = n)
+    predictions = exp(boost.pred)/(1 + exp(boost.pred))
+    pred.factor = ifelse(predictions >= 0.2, TRUE,FALSE)
+
+    #confusionMatrix(table(rev.test,pred.factor), positive = "TRUE")
+    prcurve = prediction(boost.pred,rev.test)
+    prcurve = performance(prcurve, "prec","rec")
+    #plot(prcurve)
+
+    auc = PRAUC(boost.pred,rev.test)
+    if (auc > best_auc) {
+      best_auc = auc
+      best_n = n
+      best_s = s
+      best_prcurve = prcurve
+    }
+  }
+}
+
+best_auc
+best_n
+best_s
+#summary(boost.data)
+```
+Show plot for best auc
+```{r}
+plot(best_prcurve)
 ```
 
+
 ```{r}
+boost.data = gbm(Revenue~., data = data.train,n.trees = 1000, shrinkage = 0.01, distribution = "bernoulli")
 boost.pred = predict(boost.data, newdata = data.test, n.trees = 1000)
 predictions = exp(boost.pred)/(1 + exp(boost.pred))
-pred.factor = ifelse(predictions >= 0.7, TRUE,FALSE)
+pred.factor = ifelse(predictions >= 0.5, TRUE,FALSE)
 
-confusionMatrix(table(pred.factor,rev.test))
+confusionMatrix(table(rev.test,pred.factor), positive = "TRUE")
 
-# remember that false positives are more costly than false negatives
+prcurve = prediction(boost.pred,rev.test)
+prcurve = performance(prcurve, "prec","rec")
+plot(prcurve)
+
+PRAUC(boost.pred,rev.test)
 ```
